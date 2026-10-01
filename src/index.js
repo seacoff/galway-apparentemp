@@ -10,45 +10,37 @@ function json(body, status = 200) {
   });
 }
 
-function htmlToText(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
+function decodeEntities(value) {
+  return value
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&deg;|&#176;/gi, "°")
     .replace(/&amp;/gi, "&")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&#8451;/gi, "℃");
 }
 
-function getSection(html, startLabel, endLabel) {
-  const lower = html.toLowerCase();
-  const start = lower.indexOf(startLabel.toLowerCase());
-  if (start === -1) return null;
-  const searchFrom = start + startLabel.length;
-  let end = lower.indexOf(endLabel.toLowerCase(), searchFrom);
-  if (end === -1) end = Math.min(html.length, start + 15000);
-  return htmlToText(html.slice(start, end));
+function stripTags(value) {
+  return decodeEntities(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
-function getCurrentValue(html, startLabel, endLabel) {
-  const section = getSection(html, startLabel, endLabel);
-  if (!section) return null;
-  const match = section.match(/Current\s*:\s*(-?\d+(?:\.\d+)?)/i);
+function currentValueById(html, id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const element = new RegExp(`<span\\b[^>]*\\bid=["']${escapedId}["'][^>]*>([\\s\\S]*?)<\\/span>`, "i").exec(html);
+  if (!element) return null;
+  const text = stripTags(element[1]);
+  const match = text.match(/Current\s*:\s*(-?\d+(?:\.\d+)?)/i);
   return match ? Number(match[1]) : null;
 }
 
-function readingsAreSensible({ temperature, humidity, windSpeed }) {
-  return Number.isFinite(temperature) && temperature >= -60 && temperature <= 60 &&
-    Number.isFinite(humidity) && humidity >= 0 && humidity <= 100 &&
-    Number.isFinite(windSpeed) && windSpeed >= 0 && windSpeed <= 100;
+function sensible(r) {
+  return Number.isFinite(r.temperature) && r.temperature >= -60 && r.temperature <= 60 &&
+    Number.isFinite(r.humidity) && r.humidity >= 0 && r.humidity <= 100 &&
+    Number.isFinite(r.windSpeed) && r.windSpeed >= 0 && r.windSpeed <= 100;
 }
 
 async function getWeather() {
   const upstream = await fetch(SOURCE_URL, {
     headers: {
-      "user-agent": "Coffey-SharePoint-Weather-Widget/2.0",
+      "user-agent": "Coffey-SharePoint-Weather-Widget/3.0",
       "accept": "text/html,application/xhtml+xml"
     },
     cf: { cacheTtl: 300, cacheEverything: true }
@@ -58,26 +50,31 @@ async function getWeather() {
   const html = await upstream.text();
 
   const readings = {
-    temperature: getCurrentValue(html, "Dry-bulb temperature", "Wind speed"),
-    windSpeed: getCurrentValue(html, "Wind speed", "Wind direction"),
-    humidity: getCurrentValue(html, "Relative humidity", "Barometric pressure")
+    temperature: currentValueById(html, "txtTemp"),
+    windSpeed: currentValueById(html, "txtSpeed"),
+    humidity: currentValueById(html, "txtRH")
   };
 
-  if (!readingsAreSensible(readings)) {
+  if (!sensible(readings)) {
     return json({
-      error: "The current weather readings could not be extracted safely. Incorrect values have been rejected.",
+      error: "Could not safely extract one or more Current readings from txtTemp, txtSpeed and txtRH.",
       detected: readings,
+      markersFound: {
+        txtTemp: /id=["']txtTemp["']/i.test(html),
+        txtSpeed: /id=["']txtSpeed["']/i.test(html),
+        txtRH: /id=["']txtRH["']/i.test(html)
+      },
       source: SOURCE_URL
     }, 503);
   }
 
-  return json({ ...readings, fetchedAt: new Date().toISOString(), source: SOURCE_URL });
+  return json({ ...readings, parser: "element-id-current-v3", fetchedAt: new Date().toISOString(), source: SOURCE_URL });
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/api/health") return json({ ok: true, parser: "Current readings v2" });
+    if (url.pathname === "/api/health") return json({ ok: true, parser: "element-id-current-v3" });
     if (url.pathname === "/api/weather") {
       try { return await getWeather(); }
       catch (error) { return json({ error: `Weather retrieval failed: ${error.message}` }, 502); }

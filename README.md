@@ -1,2 +1,6 @@
-# Corrected Current-readings parser
-Replace the existing Worker repository files with these files. The parser now extracts only the number following `Current:` inside the labelled temperature, wind speed and relative humidity sections. It rejects impossible ranges.
+# Galway Apparent Temperature Worker v3
+The parser targets the exact span IDs supplied from the University weather page source:
+- txtTemp
+- txtSpeed
+- txtRH
+It extracts only the numeric value following `Current:` inside each element and retains sanity validation.
