@@ -1,13 +1,1 @@
-{
-  "name": "galway-apparentemp-worker",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
-  },
-  "devDependencies": {
-    "wrangler": "^4.42.0"
-  }
-}
+{"name":"galway-apparentemp-worker","version":"2.0.0","private":true,"type":"module","scripts":{"deploy":"wrangler deploy"},"devDependencies":{"wrangler":"^4.42.0"}}

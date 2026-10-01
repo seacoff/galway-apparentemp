@@ -1,14 +1,14 @@
 const SOURCE_URL = "https://weather.universityofgalway.ie/";
 
-const json = (body, status = 200, extraHeaders = {}) =>
-  new Response(JSON.stringify(body), {
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": status === 200 ? "public, max-age=300" : "no-store",
-      ...extraHeaders,
-    },
+      "cache-control": status === 200 ? "public, max-age=300" : "no-store"
+    }
   });
+}
 
 function htmlToText(html) {
   return html
@@ -22,91 +22,67 @@ function htmlToText(html) {
     .trim();
 }
 
-function valueAfterLabel(text, labels, units = []) {
-  for (const label of labels) {
-    const index = text.search(label);
-    if (index < 0) continue;
-    const excerpt = text.slice(index, index + 320);
-    const numericMatches = [...excerpt.matchAll(/-?\d+(?:\.\d+)?/g)];
-    for (const match of numericMatches) {
-      const position = match.index ?? 0;
-      const tail = excerpt.slice(position + match[0].length, position + match[0].length + 20);
-      if (!units.length || units.some((unit) => unit.test(tail))) return Number(match[0]);
-    }
-    if (numericMatches.length) return Number(numericMatches[0][0]);
-  }
-  return null;
+function getSection(html, startLabel, endLabel) {
+  const lower = html.toLowerCase();
+  const start = lower.indexOf(startLabel.toLowerCase());
+  if (start === -1) return null;
+  const searchFrom = start + startLabel.length;
+  let end = lower.indexOf(endLabel.toLowerCase(), searchFrom);
+  if (end === -1) end = Math.min(html.length, start + 15000);
+  return htmlToText(html.slice(start, end));
+}
+
+function getCurrentValue(html, startLabel, endLabel) {
+  const section = getSection(html, startLabel, endLabel);
+  if (!section) return null;
+  const match = section.match(/Current\s*:\s*(-?\d+(?:\.\d+)?)/i);
+  return match ? Number(match[1]) : null;
+}
+
+function readingsAreSensible({ temperature, humidity, windSpeed }) {
+  return Number.isFinite(temperature) && temperature >= -60 && temperature <= 60 &&
+    Number.isFinite(humidity) && humidity >= 0 && humidity <= 100 &&
+    Number.isFinite(windSpeed) && windSpeed >= 0 && windSpeed <= 100;
 }
 
 async function getWeather() {
   const upstream = await fetch(SOURCE_URL, {
     headers: {
-      "user-agent": "Coffey-SharePoint-Weather-Widget/1.0",
-      "accept": "text/html,application/xhtml+xml",
+      "user-agent": "Coffey-SharePoint-Weather-Widget/2.0",
+      "accept": "text/html,application/xhtml+xml"
     },
-    cf: { cacheTtl: 300, cacheEverything: true },
+    cf: { cacheTtl: 300, cacheEverything: true }
   });
 
-  if (!upstream.ok) {
-    return json({ error: `University weather source returned HTTP ${upstream.status}.` }, 502);
-  }
-
+  if (!upstream.ok) return json({ error: `University weather source returned HTTP ${upstream.status}.` }, 502);
   const html = await upstream.text();
-  if (!html.trim()) return json({ error: "University weather source returned an empty page." }, 502);
 
-  const text = htmlToText(html);
-  const temperature = valueAfterLabel(
-    text,
-    [/dry[- ]?bulb temperature/i, /air temperature/i, /temperature/i],
-    [/°?\s*c/i]
-  );
-  const humidity = valueAfterLabel(text, [/relative humidity/i, /humidity/i], [/%/]);
-  const windSpeed = valueAfterLabel(
-    text,
-    [/wind speed/i, /wind velocity/i],
-    [/m\s*\/\s*s/i, /mps/i]
-  );
+  const readings = {
+    temperature: getCurrentValue(html, "Dry-bulb temperature", "Wind speed"),
+    windSpeed: getCurrentValue(html, "Wind speed", "Wind direction"),
+    humidity: getCurrentValue(html, "Relative humidity", "Barometric pressure")
+  };
 
-  if (![temperature, humidity, windSpeed].every(Number.isFinite)) {
-    return json(
-      {
-        error: "The University weather page is not currently exposing all three required numeric readings.",
-        detected: { temperature, humidity, windSpeed },
-        source: SOURCE_URL,
-      },
-      503
-    );
+  if (!readingsAreSensible(readings)) {
+    return json({
+      error: "The current weather readings could not be extracted safely. Incorrect values have been rejected.",
+      detected: readings,
+      source: SOURCE_URL
+    }, 503);
   }
 
-  return json({
-    temperature,
-    humidity,
-    windSpeed,
-    fetchedAt: new Date().toISOString(),
-    source: SOURCE_URL,
-  });
+  return json({ ...readings, fetchedAt: new Date().toISOString(), source: SOURCE_URL });
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "galway-apparentemp-worker" });
-    }
-
+    if (url.pathname === "/api/health") return json({ ok: true, parser: "Current readings v2" });
     if (url.pathname === "/api/weather") {
-      try {
-        return await getWeather();
-      } catch (error) {
-        return json({ error: `Weather retrieval failed: ${error.message}` }, 502);
-      }
+      try { return await getWeather(); }
+      catch (error) { return json({ error: `Weather retrieval failed: ${error.message}` }, 502); }
     }
-
-    if (url.pathname.startsWith("/api/")) {
-      return json({ error: "API route not found." }, 404);
-    }
-
+    if (url.pathname.startsWith("/api/")) return json({ error: "API route not found." }, 404);
     return env.ASSETS.fetch(request);
-  },
+  }
 };
