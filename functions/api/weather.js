@@ -1,34 +1,4 @@
-const SOURCE = 'https://weather.universityofgalway.ie/';
-const LIVE_DATA = `${SOURCE}getLiveData.php`;
-
-function parseLiveData(payload) {
-	const fields = payload.trim().split(',').map(field => field.trim());
-	const readings = {
-		sourceTime: fields[0],
-		temperature: Number(fields[2]),
-		windSpeed: Number(fields[4]),
-		humidity: Number(fields[6])
-	};
-	if (!readings.sourceTime || ![readings.temperature, readings.windSpeed, readings.humidity].every(Number.isFinite)) {
-		throw new Error('The University weather endpoint returned an incomplete reading.');
-	}
-	return readings;
-}
-
-export async function onRequestGet() {
-	try {
-		const response = await fetch(`${LIVE_DATA}?currentMinutes=${new Date().getMinutes()}`, {
-			headers: { 'User-Agent': 'Galway-Weather-Widget/1.0' }
-		});
-		if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
-
-		const { sourceTime, temperature, windSpeed, humidity } = parseLiveData(await response.text());
-
-		return Response.json(
-			{ temperature, humidity, windSpeed, fetchedAt: new Date().toISOString(), source: SOURCE, sourceTime },
-			{ headers: { 'Cache-Control': 'public, max-age=300' } }
-		);
-	} catch (error) {
-		return Response.json({ error: `Unable to retrieve University of Galway weather data: ${error.message}` }, { status: 502 });
-	}
-}
+const SOURCE='https://weather.universityofgalway.ie/';
+const clean=s=>s.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&deg;/gi,'°').replace(/\s+/g,' ');
+function find(text,labels){for(const label of labels){const pos=text.search(label);if(pos>=0){const slice=text.slice(pos,pos+220);const after=slice.replace(label,'');const m=after.match(/-?\d+(?:\.\d+)?/);if(m)return Number(m[0])}}return null}
+export async function onRequestGet(){try{const r=await fetch(SOURCE,{headers:{'User-Agent':'Coffey-Weather-Widget/1.0'}});if(!r.ok)throw new Error('Source returned HTTP '+r.status);const text=clean(await r.text());const temperature=find(text,[/Dry-bulb temperature/i,/Temperature/i]);const humidity=find(text,[/Relative humidity/i,/Humidity/i]);const windSpeed=find(text,[/Wind speed/i]);if(![temperature,humidity,windSpeed].every(Number.isFinite))return Response.json({error:'The University weather page is not currently exposing all three numeric readings.'},{status:503});return Response.json({temperature,humidity,windSpeed,fetchedAt:new Date().toISOString(),source:SOURCE},{headers:{'Cache-Control':'public, max-age=300'}})}catch(e){return Response.json({error:'Unable to retrieve University of Galway weather data: '+e.message},{status:502})}}

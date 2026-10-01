@@ -23,4 +23,4 @@ Cloudflare's current Pages documentation says a Pages Function belongs in a `/fu
 10. Add the resulting HTTPS URL to a SharePoint Embed web part.
 
 ## Important
-The Pages Function reads the station's live `getLiveData.php` payload, which is also used by the University's weather page. The payload is comma-separated: temperature, wind speed, and humidity are taken from fields 3, 5, and 7 respectively. If the station changes that payload format, `functions/api/weather.js` may require adjustment.
+The weather parser reads the public University webpage because no documented API endpoint has been supplied. If that HTML page changes significantly, `functions/api/weather.js` may require adjustment.
